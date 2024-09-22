@@ -30,13 +30,14 @@ import requests
 import traceback
 import threading
 import shutil
+import filecmp
 from utils import log
 from dotenv import load_dotenv
 from pathlib import Path
 
 # import ujson if installed
 try:
-    import ujson as json
+    import ujson as json  # pylint: disable=import-error
 except:
     pass
 
@@ -58,8 +59,19 @@ except:
     if not 'run.bat' in os.listdir():
         shutil.copy2('update/run.bat', 'run.bat')
 
-    # we probably need to copy this too
+    # we probably need to copy some extra files too
     shutil.copy2('update/plugins/system.json', 'plugins/system.json')
+
+    if not os.path.isdir('emojis'):
+        os.mkdir('emojis')
+
+    shutil.copy2('update/emojis/base.json', 'emojis/base.json')
+
+    if not os.path.isdir('languages'):
+        os.mkdir('languages')
+
+    for file in os.listdir('update/languages'):
+        shutil.copy2(f'update/languages/{file}', f'languages/{file}')
 
     if sys.platform == 'win32':
         print('To start the bot, please run "run.bat" instead.')
@@ -67,6 +79,26 @@ except:
         print('To start the bot, please run "./run.sh" instead.')
         print('If you get a "Permission denied" error, run "chmod +x run.sh" and try again.')
     sys.exit(1)
+
+# upgrade files in directories not targeted by upgrader in previous versions
+directories = ['boot', 'languages', 'emojis']
+replaced_boot = False
+for directory in directories:
+    if os.path.exists('update'):
+        # upgrader never upgraded, no need to check
+        break
+
+    if os.path.exists('update/'+directory):
+        # upgrader is ok, no need to upgrade
+        continue
+
+    for file in os.listdir(directory):
+        if os.path.exists(directory+'/'+file) or os.path.exists('update/'+directory+'/'+file):
+            continue
+        if not filecmp.cmp(directory+'/'+file, 'update/'+directory+'/'+file):
+            shutil.copy2('update/'+directory+'/'+file, directory+'/'+file)
+            if directory == 'boot':
+                replaced_boot = True
 
 try:
     # as only winloop or uvloop will be installed depending on the system,
@@ -148,7 +180,7 @@ if not valid_toml:
 
 if not env_loaded or not os.path.isfile('.env'):
     logger.critical(
-        'Could not load .env file! More info: https://unifier-wiki.pixels.onl/setup-selfhosted/getting-started/unifier#set-bot-token'
+        'Could not load .env file! More info: https://wiki.unifierhq.org/setup-selfhosted/getting-started/unifier#set-bot-token'
     )
     if not os.path.isfile('.env'):
         dotenv = open('.env', 'w+')
@@ -163,15 +195,15 @@ if not owner_valid:
         logger.critical('Please note that IDs should be integers and not strings.')
     sys.exit(1)
 
-if os.name == "win32":
-    logger.warning('You are using Windows, which is untested. Some features may not work.')
+if replaced_boot:
+    logger.warning('The bootloader was updated by core, as it was not updated by System Manager correctly. Please fully shut down the bot then reboot for bootloader changes to take effect.')
 
 if not '.welcome.txt' in os.listdir():
     x = open('.welcome.txt','w+')
     x.close()
     logger.info('Thank you for installing Unifier!')
     logger.info('Unifier is licensed under the AGPLv3, so if you would like to add your own twist to Unifier, you must follow AGPLv3 conditions.')
-    logger.info('You can learn more about modifying Unifier at https://unifier-wiki.pixels.onl/setup-selfhosted/modding-unifier')
+    logger.info('You can learn more about modifying Unifier at https://wiki.unifierhq.org/setup-selfhosted/modding-unifier')
 
 if not 'repo' in list(data.keys()):
     logger.critical('WARNING: THIS INSTANCE IS NOT AGPLv3 COMPLAINT!')
@@ -277,6 +309,7 @@ class DiscordBot(commands.Bot):
         self.bridge = None
         self.pyversion = sys.version_info
         self.db = AutoSaveDict({})
+        self.__uses_v3 = int(nextcord.__version__.split('.',1)[0]) == 3
 
     @property
     def owner(self):
@@ -361,6 +394,10 @@ class DiscordBot(commands.Bot):
         if not self.__devmode is None:
             raise RuntimeError('Coreboot is set')
         self.__devmode = status
+
+    @property
+    def uses_v3(self):
+        return self.__uses_v3
 
 
 bot = DiscordBot(command_prefix=data['prefix'],intents=nextcord.Intents.all())

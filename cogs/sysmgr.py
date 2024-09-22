@@ -61,7 +61,7 @@ import datetime
 
 # import ujson if installed
 try:
-    import ujson as json
+    import ujson as json  # pylint: disable=import-error
 except:
     pass
 
@@ -261,10 +261,24 @@ class Emojis:
             with open('emojis/base.json', 'r') as file:
                 base = json.load(file)
 
+        if not base['installed']:
+            base.update({'emojis_pre': base['emojis']})
+            for emoji in base['emojis'].keys():
+                text = base['emojis'][emoji][0]
+                if text.startswith(':') and text.endswith(':'):
+                    base['emojis'][emoji][0] = discord_emoji.to_unicode(text)
+            base['installed'] = True
+            if devmode:
+                with open('emojis/devbase.json', 'w+') as file:
+                    json.dump(base, file, indent=2)
+            else:
+                with open('emojis/base.json', 'w+') as file:
+                    json.dump(base, file, indent=2)
+
         if data:
             for key in base['emojis'].keys():
                 if not key in data['emojis'].keys():
-                    data['emojis'].update({key: data['emojis'][key]})
+                    data['emojis'].update({key: base['emojis'][key]})
         else:
             data = base
 
@@ -282,6 +296,10 @@ class Emojis:
         self.rooms = data['emojis']['rooms'][0]
         self.emoji = data['emojis']['emoji'][0]
         self.leaderboard = data['emojis']['leaderboard'][0]
+        self.info = data['emojis']['info'][0]
+        self.safety = data['emojis']['safety'][0]
+        self.gear = data['emojis']['gear'][0]
+        self.loading = data['emojis']['loading'][0]
 
 def cleanup_code(content):
     if content.startswith('```') and content.endswith('```'):
@@ -439,21 +457,6 @@ class SysManager(commands.Cog, name=':wrench: System Manager'):
                     base = json.load(file)
                 with open('emojis/base.json', 'w+') as file:
                     json.dump(base, file, indent=2)
-            with open('emojis/base.json', 'r') as file:
-                base = json.load(file)
-            if not base['installed']:
-                base.update({'emojis_pre': base['emojis']})
-                for emoji in base['emojis'].keys():
-                    text = base['emojis'][emoji][0]
-                    if text.startswith(':') and text.endswith(':'):
-                        base['emojis'][emoji][0] = discord_emoji.to_unicode(text)
-                base['installed'] = True
-                if self.bot.devmode:
-                    with open('emojis/devbase.json', 'w+') as file:
-                        json.dump(base, file, indent=2)
-                else:
-                    with open('emojis/base.json', 'w+') as file:
-                        json.dump(base, file, indent=2)
             try:
                 if self.bot.coreboot or self.bot.devmode:
                     raise RuntimeError()
@@ -497,8 +500,11 @@ class SysManager(commands.Cog, name=':wrench: System Manager'):
                                 continue
                         except:
                             continue
-                    script = importlib.import_module('utils.' + plugin[:-5] + '_bridge_platform')
-                    self.bot.platforms_former.update({extinfo['bridge_platform']: script})
+                    try:
+                        script = importlib.import_module('utils.' + plugin[:-5] + '_bridge_platform')
+                        self.bot.platforms_former.update({extinfo['bridge_platform']: script})
+                    except:
+                        self.logger.warning('Platform support load failed! (' + extinfo["bridge_platform"] + ')')
         if not hasattr(self.bot,'loaded_plugins'):
             self.bot.loaded_plugins = {}
             if not self.bot.safemode and not self.bot.coreboot:
@@ -701,34 +707,100 @@ class SysManager(commands.Cog, name=':wrench: System Manager'):
             embed.description = 'The bot will automatically shut down in 60 seconds.'
 
         components = ui.MessageComponents()
-        components.add_rows(
-            ui.ActionRow(
-                nextcord.ui.Button(
-                    style=nextcord.ButtonStyle.red,
-                    label='Restart' if restart else 'Shut down',
-                    custom_id='shutdown'
-                ),
-                nextcord.ui.Button(
-                    style=nextcord.ButtonStyle.gray,
-                    label='Nevermind',
-                    custom_id='cancel'
-                )
+
+        btns_row = ui.ActionRow(
+            nextcord.ui.Button(
+                style=nextcord.ButtonStyle.red,
+                label='Restart' if restart else 'Shut down',
+                custom_id='shutdown'
+            ),
+            nextcord.ui.Button(
+                style=nextcord.ButtonStyle.gray,
+                label='Nevermind',
+                custom_id='cancel'
             )
         )
+
+        options = []
+
+        if restart:
+            options = [
+                nextcord.SelectOption(
+                    default=True,
+                    value='normal',
+                    label='Normal restart',
+                    description='Restarts the bot normally.',
+                    emoji=self.bot.ui_emojis.success
+                ),
+                nextcord.SelectOption(
+                    value='safemode',
+                    label='Safemode restart',
+                    description='Restarts the bot in safemode with all Plugins disabled.',
+                    emoji=self.bot.ui_emojis.safety
+                ),
+                nextcord.SelectOption(
+                    value='core',
+                    label='Coreboot restart',
+                    description='Restarts the bot in coreboot with all Plugins and most system extensions disabled.',
+                    emoji=self.bot.ui_emojis.gear
+                )
+            ]
+            selection = nextcord.ui.StringSelect(
+                placeholder='Select restart mode...',
+                max_values=1,
+                min_values=1,
+                custom_id='selection',
+                options=options
+            )
+
+            components.add_row(
+                ui.ActionRow(selection)
+            )
+
+        components.add_row(btns_row)
 
         msg = await ctx.send(embed=embed, view=components)
 
         def check(interaction):
             return interaction.user.id == ctx.author.id and interaction.message.id == msg.id
 
-        try:
-            interaction = await self.bot.wait_for('interaction', check=check, timeout=60)
-            await interaction.response.edit_message(view=None)
+        mode = 'normal'
 
-            if interaction.data['custom_id'] == 'cancel':
-                return
-        except:
-            await msg.edit(view=None)
+        while True:
+            try:
+                interaction = await self.bot.wait_for('interaction', check=check, timeout=60)
+
+                if interaction.data['custom_id'] == 'cancel':
+                    await interaction.response.edit_message(view=None)
+                    return
+                elif interaction.data['custom_id'] == 'shutdown':
+                    await interaction.response.edit_message(view=None)
+                    break
+                else:
+                    mode = interaction.data['values'][0]
+                    for index in range(len(options)):
+                        option = options[index]
+                        if option.value == mode:
+                            options[index].default = True
+                        else:
+                            options[index].default = False
+
+                    selection = nextcord.ui.StringSelect(
+                        placeholder='Select restart mode...',
+                        max_values=1,
+                        min_values=1,
+                        custom_id='selection',
+                        options=options
+                    )
+
+                    components = ui.MessageComponents()
+                    components.add_rows(ui.ActionRow(selection), btns_row)
+                    await interaction.response.edit_message(view=components)
+            except:
+                await msg.edit(view=None)
+
+        embed.title = embed.title.replace(self.bot.ui_emojis.warning, self.bot.ui_emojis.loading, 1)
+        await msg.edit(embed=embed)
 
         self.logger.info("Attempting graceful shutdown...")
         if not self.bot.coreboot:
@@ -771,7 +843,10 @@ class SysManager(commands.Cog, name=':wrench: System Manager'):
 
         if restart:
             x = open('.restart', 'w+')
-            x.write(f'{time.time()}')
+            if mode == 'normal':
+                x.write(f'{time.time()}')
+            else:
+                x.write(f'{time.time()} {mode}')
             x.close()
 
         self.logger.info("Closing bot session")
@@ -899,7 +974,8 @@ class SysManager(commands.Cog, name=':wrench: System Manager'):
                 importlib.reload(self.bot.loaded_plugins[plugin])
                 success.append(plugin)
                 text = text + f'\n+ [DONE] {plugin}'
-            except Exception as e:
+            except:
+                e = traceback.format_exc()
                 failed.append(plugin)
                 errors.append(e)
                 text = text + f'\n- [FAIL] {plugin}'
@@ -1127,6 +1203,7 @@ class SysManager(commands.Cog, name=':wrench: System Manager'):
         failed = []
         errors = []
         text = ''
+        cmds = len(self.bot.get_application_commands())
         for extension in extensions:
             try:
                 if extension == 'lockdown':
@@ -1137,13 +1214,17 @@ class SysManager(commands.Cog, name=':wrench: System Manager'):
                     text = f'```diff\n+ [DONE] {extension}'
                 else:
                     text += f'\n+ [DONE] {extension}'
-            except Exception as e:
+            except:
+                e = traceback.format_exc()
                 failed.append(extension)
                 errors.append(e)
                 if len(text) == 0:
                     text = f'```diff\n- [FAIL] {extension}'
                 else:
                     text += f'\n- [FAIL] {extension}'
+        if len(self.bot.get_all_application_commands()) < cmds and self.bot.uses_v3:
+            # update local commands
+            await self.bot.sync_application_commands(update_known=False, delete_unknown=False)
         await msg.edit(content=selector.rawfget(
             'completed', 'sysmgr.reload_services', values={
                 'success': len(extensions)-len(failed), 'total': len(extensions), 'text': text
@@ -1153,12 +1234,12 @@ class SysManager(commands.Cog, name=':wrench: System Manager'):
         index = 0
         for fail in failed:
             if len(text) == 0:
-                text = f'{selector.rawget("extension","sysmgr.reload_servies")} `{fail}`\n```{errors[index]}```'
+                text = f'{selector.rawget("extension","sysmgr.reload_services")} `{fail}`\n```{errors[index]}```'
             else:
-                text = f'\n\n{selector.rawget("extension","sysmgr.reload_servies")} `{fail}`\n```{errors[index]}```'
+                text = f'\n\n{selector.rawget("extension","sysmgr.reload_services")} `{fail}`\n```{errors[index]}```'
             index += 1
         if not len(failed) == 0:
-            await ctx.author.send(f'**{selector.rawget("fail_logs","sysmgr.reload_servies")}**\n{text}')
+            await ctx.author.send(f'**{selector.rawget("fail_logs","sysmgr.reload_services")}**\n{text}')
 
     @commands.command(hidden=True,description=language.desc('sysmgr.load'))
     @restrictions.owner()
@@ -1179,7 +1260,8 @@ class SysManager(commands.Cog, name=':wrench: System Manager'):
                     text = f'```diff\n+ [DONE] {extension}'
                 else:
                     text += f'\n+ [DONE] {extension}'
-            except Exception as e:
+            except:
+                e = traceback.format_exc()
                 failed.append(extension)
                 errors.append(e)
                 if len(text) == 0:
@@ -1199,7 +1281,7 @@ class SysManager(commands.Cog, name=':wrench: System Manager'):
                 text = f'\n\nExtension `{fail}`\n```{errors[index]}```'
             index += 1
         if not len(failed) == 0:
-            await ctx.author.send(f'**{selector.rawget("fail_logs","sysmgr.reload_servies")}**\n{text}')
+            await ctx.author.send(f'**{selector.rawget("fail_logs","sysmgr.reload_services")}**\n{text}')
 
     @commands.command(hidden=True,description='Unloads an extension.')
     @restrictions.owner()
@@ -1225,7 +1307,8 @@ class SysManager(commands.Cog, name=':wrench: System Manager'):
                     text = f'```diff\n+ [DONE] {extension}'
                 else:
                     text += f'\n+ [DONE] {extension}'
-            except Exception as e:
+            except:
+                e = traceback.format_exc()
                 failed.append(extension)
                 errors.append(e)
                 if len(text) == 0:
@@ -1245,7 +1328,7 @@ class SysManager(commands.Cog, name=':wrench: System Manager'):
                 text = f'\n\nExtension `{fail}`\n```{errors[index]}```'
             index += 1
         if not len(failed) == 0:
-            await ctx.author.send(f'**{selector.rawget("fail_logs","sysmgr.reload_servies")}**\n{text}')
+            await ctx.author.send(f'**{selector.rawget("fail_logs","sysmgr.reload_services")}**\n{text}')
 
     @commands.command(hidden=True,description='Installs a plugin.')
     @restrictions.owner()
@@ -1260,7 +1343,7 @@ class SysManager(commands.Cog, name=':wrench: System Manager'):
             url = url[:-1]
         if not url.endswith('.git'):
             url = url + '.git'
-        embed = nextcord.Embed(title=f'{self.bot.ui_emojis.install} {selector.get("downloading_title")}', description=selector.get("downloading_body"))
+        embed = nextcord.Embed(title=f'{self.bot.ui_emojis.loading} {selector.get("downloading_title")}', description=selector.get("downloading_body"))
         embed.set_footer(text='Only install plugins from trusted sources!')
         msg = await ctx.send(embed=embed)
         try:
@@ -1332,7 +1415,7 @@ class SysManager(commands.Cog, name=':wrench: System Manager'):
                 return
         except:
             try:
-                await self.bot.loop.run_in_executor(None, lambda: status(os.system('git -version')))
+                await self.bot.loop.run_in_executor(None, lambda: status(os.system('git --version')))
             except:
                 embed.title = f'{self.bot.ui_emojis.error} Failed to install plugin'
                 embed.description = 'Git is not installed.'
@@ -1424,6 +1507,8 @@ class SysManager(commands.Cog, name=':wrench: System Manager'):
             components = ui.MessageComponents()
             components.add_row(btns)
             return await interaction.response.edit_message(view=components)
+
+        embed.title = embed.title.replace(self.bot.ui_emojis.install, self.bot.ui_emojis.loading, 1)
 
         await interaction.response.edit_message(embed=embed, view=None)
         try:
@@ -1617,16 +1702,21 @@ class SysManager(commands.Cog, name=':wrench: System Manager'):
 
         if plugin=='system':
             embed = nextcord.Embed(
-                title=f'{self.bot.ui_emojis.install} {selector.get("checking_title")}',
+                title=f'{self.bot.ui_emojis.loading} {selector.get("checking_title")}',
                 description=selector.get('checking_body')
             )
             msg = await ctx.send(embed=embed)
             available = []
+            clone_success = False
             try:
-                await self.bot.loop.run_in_executor(None, lambda: shutil.rmtree('update_check'))
-                await self.bot.loop.run_in_executor(None, lambda: os.system(
+                try:
+                    await self.bot.loop.run_in_executor(None, lambda: shutil.rmtree('update_check'))
+                except:
+                    pass
+                await self.bot.loop.run_in_executor(None, lambda: status(os.system(
                     'git clone --branch ' + self.bot.config['branch'] + ' ' + self.bot.config[
-                        'check_endpoint'] + ' update_check'))
+                        'check_endpoint'] + ' update_check')))
+                clone_success = True
                 with open('plugins/system.json', 'r') as file:
                     current = json.load(file)
                 with open('update_check/update.json', 'r') as file:
@@ -1646,8 +1736,9 @@ class SysManager(commands.Cog, name=':wrench: System Manager'):
                     index += 1
                 update_available = len(available) >= 1
             except:
+                self.logger.exception('An error occurred!')
                 try:
-                    await self.bot.loop.run_in_executor(None, lambda: status(os.system('git -version')))
+                    await self.bot.loop.run_in_executor(None, lambda: status(os.system('git --version')))
                 except:
                     embed.title = f'{self.bot.ui_emojis.error} {selector.get("checkfail_title")}'
                     embed.description = 'Git is not installed.'
@@ -1656,6 +1747,10 @@ class SysManager(commands.Cog, name=':wrench: System Manager'):
 
                 embed.title = f'{self.bot.ui_emojis.error} {selector.get("checkfail_title")}'
                 embed.description = selector.get("checkfail_body")
+
+                if not clone_success:
+                    embed.description = 'Git clone failed, check console'
+
                 embed.colour = self.bot.colors.error
                 return await msg.edit(embed=embed)
             if not update_available:
@@ -1735,7 +1830,7 @@ class SysManager(commands.Cog, name=':wrench: System Manager'):
                     selected = int(interaction.data['values'][0])
             self.logger.info('Upgrade confirmed, preparing...')
             if not no_backup:
-                embed.title = f'{self.bot.ui_emojis.install} {selector.get("backup_title")}'
+                embed.title = f'{self.bot.ui_emojis.loading} {selector.get("backup_title")}'
                 embed.description = selector.get("backup_body")
                 await interaction.response.edit_message(embed=embed, view=None)
             try:
@@ -1817,6 +1912,7 @@ class SysManager(commands.Cog, name=':wrench: System Manager'):
                     self.logger.warning('Backup failed, continuing anyways')
                     embed.description = f'- :x: {selector.get("failed_backup")}\n- :wrench: {selector.get("modification_wipe")}\n- :warning: {selector.get("no_abort")}'
                 else:
+                    self.logger.exception('An error occurred!')
                     self.logger.error('Backup failed, abort upgrade.')
                     embed.title = f'{self.bot.ui_emojis.error} {selector.get("backupfail_title")}'
                     embed.description = selector.get("backupfail_body")
@@ -1848,13 +1944,16 @@ class SysManager(commands.Cog, name=':wrench: System Manager'):
                 components.add_row(btns)
                 return await interaction.response.edit_message(view=components)
             self.logger.debug('Upgrade confirmed, beginning upgrade')
-            embed.title = f'{self.bot.ui_emojis.install} {selector.get("upgrading")}'
-            embed.description = f':hourglass_flowing_sand: {selector.get("downloading")}\n:x: {selector.get("installing")}\n:x: {selector.get("reloading")}'
+            embed.title = f'{self.bot.ui_emojis.loading} {selector.get("upgrading")}'
+            embed.description = f'{self.bot.ui_emojis.loading} {selector.get("downloading")}\n:x: {selector.get("installing")}\n:x: {selector.get("reloading")}'
             await interaction.response.edit_message(embed=embed, view=None)
             self.logger.info('Starting upgrade')
             try:
                 self.logger.debug('Purging old update files')
-                await self.bot.loop.run_in_executor(None, lambda: shutil.rmtree('update'))
+                try:
+                    await self.bot.loop.run_in_executor(None, lambda: shutil.rmtree('update'))
+                except:
+                    pass
                 self.logger.info('Downloading from remote repository...')
                 await self.bot.loop.run_in_executor(None, lambda: os.system(
                     'git clone --branch ' + version + ' --single-branch --depth 1 ' + self.bot.config[
@@ -1899,6 +1998,8 @@ class SysManager(commands.Cog, name=':wrench: System Manager'):
                     self.logger.warning('Could not find requirements.txt, installing all dependencies')
                     olddeps = []
                 for dep in olddeps:
+                    if dep.startswith('git+'):
+                        continue
                     try:
                         newdeps.remove(dep)
                     except:
@@ -1925,7 +2026,7 @@ class SysManager(commands.Cog, name=':wrench: System Manager'):
                 return
             try:
                 self.logger.info('Installing upgrades')
-                embed.description = f':white_check_mark: {selector.get("downloading")}\n:hourglass_flowing_sand: {selector.get("installing")}\n:x: {selector.get("reloading")}'
+                embed.description = f'{self.bot.ui_emojis.success} {selector.get("downloading")}\n{self.bot.ui_emojis.loading} {selector.get("installing")}\n:x: {selector.get("reloading")}'
                 await msg.edit(embed=embed)
                 self.logger.debug('Installing: ' + os.getcwd() + '/update/unifier.py')
                 await self.copy('update/unifier.py', 'unifier.py')
@@ -1947,6 +2048,13 @@ class SysManager(commands.Cog, name=':wrench: System Manager'):
                 for file in os.listdir(os.getcwd() + '/update/utils'):
                     self.logger.debug('Installing: ' + os.getcwd() + '/update/utils/' + file)
                     await self.copy('update/utils/' + file, 'utils/' + file)
+                for file in os.listdir(os.getcwd() + '/update/boot'):
+                    self.logger.debug('Installing: ' + os.getcwd() + '/update/boot/' + file)
+                    await self.copy('update/boot/' + file, 'boot/' + file)
+                self.logger.debug('Installing: ' + os.getcwd() + '/update/run.sh')
+                await self.copy('update/run.sh', 'run.sh')
+                self.logger.debug('Installing: ' + os.getcwd() + '/update/run.bat')
+                await self.copy('update/run.bat', 'run.bat')
                 self.logger.debug('Installing: ' + os.getcwd() + '/update/emojis/base.json')
                 await self.copy('update/emojis/base.json', 'emojis/base.json')
                 self.logger.debug('Updating languages')
@@ -1956,9 +2064,6 @@ class SysManager(commands.Cog, name=':wrench: System Manager'):
 
                     self.logger.debug('Installing: ' + os.getcwd() + '/update/languages/' + file)
                     await self.copy('update/languages/' + file, 'languages/' + file)
-                for file in os.listdir(os.getcwd() + '/update/utils'):
-                    self.logger.debug('Installing: ' + os.getcwd() + '/update/utils/' + file)
-                    await self.copy('update/utils/' + file, 'utils/' + file)
                 self.logger.debug('Updating config.toml')
                 with open('config.toml','rb') as file:
                     oldcfg = tomli.load(file)
@@ -1991,12 +2096,12 @@ class SysManager(commands.Cog, name=':wrench: System Manager'):
                     self.bot.update = True
                     self.logger.info('Upgrade complete, reboot required')
                     embed.title = f'{self.bot.ui_emojis.success} {selector.get("restart_title")}'
-                    embed.description =selector.get("restart_body")
+                    embed.description = selector.get("restart_body")
                     embed.colour = self.bot.colors.success
                     await msg.edit(embed=embed)
                 else:
                     self.logger.info('Reloading extensions')
-                    f':white_check_mark: {selector.get("downloading")}\n:white_check_mark: {selector.get("installing")}\n:hourglass_flowing_sand: {selector.get("reloading")}'
+                    embed.description = f'{self.bot.ui_emojis.success} {selector.get("downloading")}\n{self.bot.ui_emojis.success} {selector.get("installing")}\n{self.bot.ui_emojis.loading} {selector.get("reloading")}'
                     await msg.edit(embed=embed)
                     for cog in list(self.bot.extensions):
                         self.logger.debug('Reloading extension: ' + cog)
@@ -2006,6 +2111,8 @@ class SysManager(commands.Cog, name=':wrench: System Manager'):
                         except:
                             self.logger.warning(cog+' could not be reloaded.')
                             embed.set_footer(text=':warning: Some extensions could not be reloaded.')
+                    if self.bot.uses_v3:
+                        await self.bot.sync_application_commands(update_known=False, delete_unknown=False)
                     self.logger.info('Upgrade complete')
                     embed.title = f'{self.bot.ui_emojis.success} {selector.get("success_title")}'
                     embed.description = selector.get("success_body")
@@ -2037,7 +2144,7 @@ class SysManager(commands.Cog, name=':wrench: System Manager'):
                 await msg.edit(embed=embed)
                 return
         else:
-            embed = nextcord.Embed(title=f'{self.bot.ui_emojis.install} {selector.rawget("downloading_title","sysmgr.install")}', description=selector.rawget("downloading_body",'sysmgr.install'))
+            embed = nextcord.Embed(title=f'{self.bot.ui_emojis.loading} {selector.rawget("downloading_title","sysmgr.install")}', description=selector.rawget("downloading_body",'sysmgr.install'))
 
             try:
                 with open('plugins/'+plugin+'.json') as file:
@@ -2054,7 +2161,10 @@ class SysManager(commands.Cog, name=':wrench: System Manager'):
             msg = await ctx.send(embed=embed)
             url = plugin_info['repository']
             try:
-                await self.bot.loop.run_in_executor(None, lambda: shutil.rmtree('plugin_install'))
+                try:
+                    await self.bot.loop.run_in_executor(None, lambda: shutil.rmtree('plugin_install'))
+                except:
+                    pass
                 await self.bot.loop.run_in_executor(None, lambda: status(os.system(
                     'git clone ' + url + ' plugin_install')))
                 with open('plugin_install/plugin.json', 'r') as file:
@@ -2080,7 +2190,7 @@ class SysManager(commands.Cog, name=':wrench: System Manager'):
                 services = new['services'] if 'services' in new.keys() else []
             except:
                 try:
-                    await self.bot.loop.run_in_executor(None, lambda: status(os.system('git -version')))
+                    await self.bot.loop.run_in_executor(None, lambda: status(os.system('git --version')))
                 except:
                     embed.title = f'{self.bot.ui_emojis.error} {selector.get("pfailed")}'
                     embed.description = 'Git is not installed.'
@@ -2723,16 +2833,25 @@ class SysManager(commands.Cog, name=':wrench: System Manager'):
                 descmatch = True
                 match = 0
 
-    @commands.command(hidden=True, description='Registers commands.')
+    @commands.command(name='register-commands', hidden=True, description='Registers commands.')
     @restrictions.owner()
-    async def forcereg(self, ctx, *, args=''):
-        if not ctx.author.id == self.bot.config['owner']:
-            return
+    async def register_commands(self, ctx, *, args=''):
         if 'dereg' in args:
             await self.bot.delete_application_commands(*self.bot.get_all_application_commands())
             return await ctx.send('gone, reduced to atoms (hopefully)')
         await self.bot.sync_application_commands()
-        return await ctx.send(f'Registered commands to bot')
+        return await ctx.send('Registered commands to bot')
+
+    @commands.command(
+        name='fix-commands', hidden=True,
+        description='Fixes broken application commands. Does not fix standard text commands.'
+    )
+    @restrictions.owner()
+    async def fix_commands(self, ctx):
+        if not self.bot.uses_v3:
+            return await ctx.send('Your instance uses a Nextcord version older than v3, so this is not required.')
+        await self.bot.sync_application_commands(update_known=False, delete_unknown=False)
+        return await ctx.send('Fixed application commands')
 
     @commands.command(hidden=True, description='Views cloud backup status.')
     @restrictions.owner()

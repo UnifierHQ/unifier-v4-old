@@ -24,7 +24,7 @@ import os
 
 # import ujson if installed
 try:
-    import ujson as json
+    import ujson as json  # pylint: disable=import-error
 except:
     pass
 
@@ -96,8 +96,6 @@ class LanguageManager:
             except:
                 return self.language_base['strings'][extname][cmdname][string]
         except:
-            if self.bot:
-                self.logger.exception('An error occurred!')
             return default
 
     def get_formatted(self,
