@@ -2006,6 +2006,7 @@ class UnifierBridge:
                         if source == 'discord':
                             msg = await message.channel.fetch_message(message.reference.message_id)
                         else:
+                            # no need to attempt a refetch as that has already been done
                             raise
                         count = len(msg.embeds) + len(msg.attachments)
 
@@ -2439,6 +2440,16 @@ class UnifierBridge:
 
         if id_override:
             parent_id = id_override
+
+        if source == 'discord':
+            urls.update({f'{message.guild.id}': message.jump_url})
+        else:
+            guild_id = source_support.get_id(source_support.server(message))
+            try:
+                msg_url = source_support.url(message)
+                urls.update({f'{guild_id}': msg_url})
+            except platform_base.MissingImplementation:
+                pass
 
         try:
             index = await self.indexof(parent_id)
@@ -3532,22 +3543,22 @@ class Bridge(commands.Cog, name=':link: Bridge'):
                 if not interaction.user.id in self.bot.moderators:
                     return await interaction.response.send_message('go away',ephemeral=True)
 
-                await interaction.response.defer(ephemeral=True,with_message=True)
+                await interaction.response.send_message(f'{self.bot.ui_emojis.loading} Deleting message...',ephemeral=True)
 
                 try:
                     await self.bot.bridge.delete_parent(msg_id)
                     if msg.webhook:
                         raise ValueError()
                     await interaction.message.edit(view=components)
-                    return await interaction.edit_original_message(language.get("parent_delete","moderation.delete",language=selector.language_set))
+                    return await interaction.edit_original_message(content=f'{self.bot.ui_emojis.success} ' + language.get("parent_delete","moderation.delete",language=selector.language_set))
                 except:
                     try:
                         deleted = await self.bot.bridge.delete_copies(msg_id)
                         await interaction.message.edit(view=components)
-                        return await interaction.edit_original_message(language.fget("children_delete","moderation.delete",values={"count": deleted},language=selector.language_set))
+                        return await interaction.edit_original_message(content=f'{self.bot.ui_emojis.success} ' + language.fget("children_delete","moderation.delete",values={"count": deleted},language=selector.language_set))
                     except:
                         traceback.print_exc()
-                        await interaction.edit_original_message(content=language.get("error","moderation.delete",language=selector.language_set))
+                        await interaction.edit_original_message(content=f'{self.bot.ui_emojis.error} ' + language.get("error","moderation.delete",language=selector.language_set))
             elif interaction.data["custom_id"].startswith('rpreview_'):
                 selector = language.get_selector('moderation.report',userid=interaction.user.id)
                 btns = ui.ActionRow(
@@ -3690,7 +3701,7 @@ class Bridge(commands.Cog, name=':link: Bridge'):
             except:
                 return await interaction.response.send_message(selector.get('failed'), ephemeral=True)
 
-            await interaction.response.defer(ephemeral=True,with_message=False)
+            await interaction.response.send_message(f'{self.bot.ui_emojis.loading} Sending report...', ephemeral=True)
             cat = report[0]
             cat2 = report[1]
             content = report[2]
