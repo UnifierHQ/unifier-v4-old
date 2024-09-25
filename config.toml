@@ -5,6 +5,7 @@ debug = false
 package = "unifier"
 language = "english"
 skip_status_check = false
+encrypted_env_salt = 10
 
 [roles]
 owner = -1
@@ -50,6 +51,7 @@ use_multicore = true
 allow_posts = false
 enable_exp = false
 exp_cooldown = 30
+existence_wait = 0
 enable_emoji_tags = false
 enable_ctx_commands = true
 enable_rotating_status = true

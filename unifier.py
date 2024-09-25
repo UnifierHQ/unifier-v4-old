@@ -31,8 +31,7 @@ import traceback
 import threading
 import shutil
 import filecmp
-from utils import log
-from dotenv import load_dotenv
+from utils import log, secrets
 from pathlib import Path
 
 # import ujson if installed
@@ -159,7 +158,10 @@ for key in data:
 
 data = newdata
 
-env_loaded = load_dotenv()
+encrypted_env = {}
+ivs = {}
+
+should_encrypt = int(os.environ['UNIFIER_ENCOPTION']) == 1
 
 level = logging.DEBUG if data['debug'] else logging.INFO
 package = data['package']
@@ -177,17 +179,6 @@ except:
 if not valid_toml:
     logger.warning('From v3.0.0, Unifier will use config.toml rather than config.json.')
     logger.warning('To change your Unifier configuration, please use the new file.')
-
-if not env_loaded or not os.path.isfile('.env'):
-    logger.critical(
-        'Could not load .env file! More info: https://wiki.unifierhq.org/setup-selfhosted/getting-started/unifier#set-bot-token'
-    )
-    if not os.path.isfile('.env'):
-        dotenv = open('.env', 'w+')
-        dotenv.write('TOKEN=token_goes_here')
-        dotenv.close()
-        logger.critical('A template .env file was created. Please add your token to that file to start Unifier.')
-    sys.exit(1)
 
 if not owner_valid:
     logger.critical('Invalid owner user ID in configuration!')
@@ -276,6 +267,7 @@ class AutoSaveDict(dict):
         if self.__save_lock:
             return
         with open(self.file_path, 'w') as file:
+            # noinspection PyTypeChecker
             json.dump(self, file, indent=4)
         return
 
@@ -310,6 +302,11 @@ class DiscordBot(commands.Bot):
         self.pyversion = sys.version_info
         self.db = AutoSaveDict({})
         self.__uses_v3 = int(nextcord.__version__.split('.',1)[0]) == 3
+        self.__tokenstore = secrets.TokenStore(not should_encrypt, os.environ['UNIFIER_ENCPASS'], data['encrypted_env_salt'], data['debug'])
+
+        if should_encrypt:
+            self.__tokenstore.to_encrypted(os.environ['UNIFIER_ENCPASS'], data['encrypted_env_salt'])
+            os.remove('.env')
 
     @property
     def owner(self):
@@ -399,6 +396,10 @@ class DiscordBot(commands.Bot):
     def uses_v3(self):
         return self.__uses_v3
 
+    @property
+    def tokenstore(self):
+        return self.__tokenstore
+
 
 bot = DiscordBot(command_prefix=data['prefix'],intents=nextcord.Intents.all())
 bot.config = data
@@ -407,6 +408,12 @@ bot.coreboot = 'core' in sys.argv
 bot.safemode = 'safemode' in sys.argv and not bot.coreboot
 bot.devmode = 'devmode' in sys.argv
 mentions = nextcord.AllowedMentions(everyone=False,roles=False,users=False)
+
+if not bot.tokenstore.test_decrypt():
+    del os.environ['UNIFIER_ENCPASS']
+    print('\x1b[31;1mInvalid password. Your encryption password is needed to decrypt tokens.\x1b[0m')
+    print('\x1b[31;1mIf you\'ve forgot your password, run the bootscript again with --clear-tokens\x1b[0m')
+    sys.exit(1)
 
 if bot.coreboot:
     logger.warning('Core-only boot is enabled. Only core and System Manager will be loaded.')
@@ -502,7 +509,7 @@ async def on_message(message):
         return await bot.process_commands(message)
 
 try:
-    bot.run(os.environ.get('TOKEN'))
+    bot.run(bot.tokenstore.retrieve('TOKEN'))
 except SystemExit as e:
     try:
         code = int(f'{e}')

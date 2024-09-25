@@ -861,6 +861,7 @@ class UnifierBridge:
     def raidban(self,userid):
         self.raidbans.update({f'{userid}':UnifierRaidBan()})
 
+    # noinspection PyTypeChecker
     async def backup(self,filename='bridge.json',limit=10000):
         if self.backup_lock:
             return
@@ -977,18 +978,23 @@ class UnifierBridge:
                 return {thread: self.__bot.db['threads'][thread]}
         return None
 
-    async def fetch_message(self,message_id,prehook=False,not_prehook=False):
+    async def fetch_message(self,message_id,prehook=False,not_prehook=False,can_wait=False):
         if prehook and not_prehook:
             raise ValueError('Conflicting arguments')
-        for message in self.bridged:
-            if (str(message.id)==str(message_id) or str(message_id) in str(message.copies) or
-                    str(message_id) in str(message.external_copies) or str(message.prehook)==str(message_id)):
-                if prehook and str(message.prehook)==str(message_id) and not str(message.id) == str(message_id):
-                    return message
-                elif not_prehook and not str(message.prehook) == str(message_id):
-                    return message
-                elif not prehook:
-                    return message
+        waiting = self.__bot.config['existence_wait']
+        if waiting <= 0 or not can_wait:
+            waiting = 1
+        for waited in range(waiting):
+            for message in self.bridged:
+                if (str(message.id)==str(message_id) or str(message_id) in str(message.copies) or
+                        str(message_id) in str(message.external_copies) or str(message.prehook)==str(message_id)):
+                    if prehook and str(message.prehook)==str(message_id) and not str(message.id) == str(message_id):
+                        return message
+                    elif not_prehook and not str(message.prehook) == str(message_id):
+                        return message
+                    elif not prehook:
+                        return message
+            await asyncio.sleep(1)
         raise ValueError("No message found")
 
     async def delete_message(self,message):
@@ -1101,7 +1107,7 @@ class UnifierBridge:
         return self.dedupe[username].index(userid)-1
 
     async def delete_parent(self, message):
-        msg: UnifierBridge.UnifierMessage = await self.fetch_message(message)
+        msg: UnifierBridge.UnifierMessage = await self.fetch_message(message, can_wait=True)
         if msg.source=='discord':
             ch = self.__bot.get_channel(int(msg.channel_id))
             todelete = await ch.fetch_message(int(msg.id))
@@ -1116,7 +1122,7 @@ class UnifierBridge:
             await source_support.delete(todelete)
 
     async def delete_copies(self, message):
-        msg: UnifierBridge.UnifierMessage = await self.fetch_message(message)
+        msg: UnifierBridge.UnifierMessage = await self.fetch_message(message, can_wait=True)
         threads = []
 
         async def delete_discord(msgs):
@@ -1331,7 +1337,8 @@ class UnifierBridge:
         return text
 
     async def edit(self, message, content):
-        msg: UnifierBridge.UnifierMessage = await self.fetch_message(message)
+        msg: UnifierBridge.UnifierMessage = await self.fetch_message(message, can_wait=True)
+
         threads = []
 
         async def edit_discord(msgs,friendly=False):
@@ -1851,7 +1858,7 @@ class UnifierBridge:
                         urls.update({f'{message.guild.id}':f'https://discord.com/channels/{message.guild.id}/{message.channel.id}/{message.id}'})
                     else:
                         try:
-                            urls.update({f'{source_support.server(message)}': source_support.url(message)})
+                            urls.update({f'{source_support.get_id(source_support.server(message))}': source_support.url(message)})
                         except platform_base.MissingImplementation:
                             pass
                     continue
