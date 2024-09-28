@@ -1064,9 +1064,9 @@ class SysManager(commands.Cog, name=':wrench: System Manager'):
     async def restart(self, ctx):
         await self.bot_shutdown(ctx, restart=True)
 
-    @commands.command(hidden=True,description=language.desc('sysmgr.plugins'))
+    @commands.command(aliases=['plugins'],hidden=True,description=language.desc('sysmgr.modifiers'))
     @restrictions.owner()
-    async def plugins(self, ctx, *, plugin=None):
+    async def modifiers(self, ctx, *, plugin=None):
         selector = language.get_selector(ctx)
         if plugin:
             plugin = plugin.lower()
@@ -1348,7 +1348,7 @@ class SysManager(commands.Cog, name=':wrench: System Manager'):
         if not url.endswith('.git'):
             url = url + '.git'
         embed = nextcord.Embed(title=f'{self.bot.ui_emojis.loading} {selector.get("downloading_title")}', description=selector.get("downloading_body"))
-        embed.set_footer(text='Only install plugins from trusted sources!')
+        embed.set_footer(text='Only install Modifiers from trusted sources!')
         msg = await ctx.send(embed=embed)
         try:
             try:
@@ -2120,6 +2120,9 @@ class SysManager(commands.Cog, name=':wrench: System Manager'):
                             embed.set_footer(text=':warning: Some extensions could not be reloaded.')
                     if self.bot.uses_v3:
                         await self.bot.sync_application_commands(update_known=False, delete_unknown=False)
+                    self.logger.info('Updating localization')
+                    self.bot.langmgr = langmgr.LanguageManager(self.bot)
+                    self.bot.langmgr.load()
                     self.logger.info('Upgrade complete')
                     embed.title = f'{self.bot.ui_emojis.success} {selector.get("success_title")}'
                     embed.description = selector.get("success_body")
@@ -2959,7 +2962,7 @@ class SysManager(commands.Cog, name=':wrench: System Manager'):
     @commands.command(description='Shows bot uptime.')
     async def uptime(self, ctx):
         embed = nextcord.Embed(
-            title=f'{self.bot.user.global_name} uptime',
+            title=f'{self.bot.user.global_name or self.bot.user.name} uptime',
             description=f'The bot has been up since <t:{self.bot.ut_total}:f>.',
             color=self.bot.colors.unifier
         )
