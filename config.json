@@ -1,4 +1,0 @@
-{
-  "note": "From Unifier v3, config.json will no longer be in use. This file is only here so that upgrades to v3 don't fail.",
-  "note_2": "All your configuration data has been copied over to config.toml."
-}

@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Unifier run script for systems that use Bash (e.g. Linux/macOS)
+# If you're using Docker, you don't need this.
+
 FILEPATH="$(which python3)"
 
 if [[ -z $FILEPATH ]]; then
