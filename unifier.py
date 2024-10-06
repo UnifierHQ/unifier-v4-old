@@ -31,6 +31,7 @@ import traceback
 import threading
 import shutil
 import filecmp
+import datetime
 from utils import log, secrets
 from pathlib import Path
 
@@ -201,8 +202,12 @@ if not 'repo' in list(data.keys()):
     logger.critical('Unifier is licensed under the AGPLv3, meaning you need to make your source code available to users. Please add a repository to the config file under the repo key.')
     sys.exit(1)
 
+# Deprecation warnings
 if 'allow_prs' in list(data.keys()) and not 'allow_posts' in list(data.keys()):
     logger.warning('From v1.2.4, allow_prs is deprecated. Use allow_posts instead.')
+
+if 'external' in list(data.keys()):
+    logger.warning('From v3.3.0, external is deprecated. To disable a platform, please uninstall the support plugin.')
 
 if 'token' in list(data.keys()):
     logger.warning('From v1.1.8, Unifier uses .env (dotenv) files to store tokens. We recommend you remove the old token keys from your config.json file.')
@@ -292,6 +297,7 @@ class DiscordBot(commands.Bot):
         super().__init__(*args, **kwargs)
         self.__ready = False
         self.__update = False
+        self.__b_update = False
         self.__config = None
         self.__boot_config = None
         self.__safemode = None
@@ -363,6 +369,16 @@ class DiscordBot(commands.Bot):
         self.__update = update
 
     @property
+    def b_update(self):
+        return self.__b_update
+
+    @b_update.setter
+    def b_update(self, update):
+        if self.__b_update:
+            raise RuntimeError('Update lock is set')
+        self.__b_update = update
+
+    @property
     def safemode(self):
         return self.__safemode
 
@@ -432,6 +448,49 @@ print(asciiart)
 print('Version: '+vinfo['version'])
 print('Release '+str(vinfo['release']))
 print()
+dt = datetime.datetime.now()
+
+seasonal_strings = {
+    1: {
+        1: f'\U0001F973 {dt.year} is here! Happy new year!'
+    },
+    2: {
+        14: f'\U0001F49D Happy Valentine\'s Day!',
+        15: None
+    },
+    4: {
+        1: f'\U0001F608 time to get a lil mischievous hehe',
+        2: None
+    },
+    5: {
+        13: f'\U0001F914 Apparently it\'s Discord\'s birthday today.',
+        14: None
+    },
+    10: {
+        1: f'\U0001F383 ooooOOOOOooooo (ghost says: happy spooktober)'
+    },
+    11: {
+        1: f'\U0001F9CA the defrosting has begun. \x1b[1mstart running.\x1b[0m'
+    },
+    12: {
+        1: f'\U0001F384 Merry Christmas and a happy new year!',
+        20: f'\U0001F382 Happy birthday to the Unifier project!',
+        21: f'\U0001F384 Merry Christmas and a happy new year!'
+    }
+}
+
+seasonal_string = seasonal_strings.get(dt.month, None)
+if seasonal_string:
+    string_key = 1
+    for key in seasonal_string.keys():
+        if key > dt.day:
+            break
+        string_key = key
+
+    to_print = seasonal_string.get(string_key, None)
+    if to_print:
+        print(to_print)
+        print()
 
 @bot.event
 async def on_ready():

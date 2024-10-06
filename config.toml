@@ -46,7 +46,6 @@ reports_channel = -1
 moderator_role = -1
 
 [bridge]
-external = ["revolt", "guilded"]
 use_multicore = true
 allow_posts = false
 enable_exp = false
@@ -55,6 +54,7 @@ existence_wait = 0
 enable_emoji_tags = false
 enable_ctx_commands = true
 enable_rotating_status = true
+enable_seasonal_status = true # Rotating status must be enabled for this to have any effect.
 enable_safety_alerts = false
 safe_filetypes = true
 suppress_filesize_warning = false

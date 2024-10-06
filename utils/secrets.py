@@ -20,7 +20,9 @@ import os
 import json
 import base64
 import traceback
+import string
 from dotenv import load_dotenv
+from Crypto.Random import random
 from Crypto.Protocol.KDF import PBKDF2
 from Crypto.Cipher import AES
 from Crypto import Random as CryptoRandom
@@ -37,6 +39,7 @@ class Encryptor:
         pass
 
     def encrypt(self, encoded, password, salt):
+        """Encrypts a given bytes object."""
         __key = PBKDF2(password, salt, dkLen=32)
 
         iv = CryptoRandom.get_random_bytes(16)
@@ -47,6 +50,7 @@ class Encryptor:
         return result, base64.b64encode(iv).decode('ascii')
 
     def decrypt(self, encrypted, password, salt, iv_string):
+        """Decrypts a given encrypted bytes object."""
         iv = base64.b64decode(iv_string)
         __key = PBKDF2(password, salt, dkLen=32)
         __cipher = AES.new(__key, AES.MODE_CBC, iv=iv)
@@ -127,7 +131,7 @@ class TokenStore:
         ivs = {'test': None}
 
         test_value, test_iv = self.__encryptor.encrypt(str.encode(
-            'This can be anything, as long as it is a string. Otherwise, except decryption test to fail.'
+            ''.join([random.choice(string.ascii_letters + string.digits) for _ in range(16)])
         ), password, salt)
 
         encrypted_env['test'] = base64.b64encode(test_value).decode('ascii')
@@ -196,6 +200,9 @@ class TokenStore:
         if not identifier in self.tokens:
             raise KeyError('token does not exist')
 
+        if identifier == 'test':
+            raise ValueError('cannot replace token, this is needed for password verification')
+
         encrypted, iv = self.__encryptor.encrypt(str.encode(token), self.__password, self.__salt)
         self.__data.update({identifier: base64.b64encode(encrypted).decode('ascii')})
         self.__ivs.update({identifier: iv})
@@ -208,6 +215,9 @@ class TokenStore:
 
         if not identifier in self.tokens:
             raise KeyError('token does not exist')
+
+        if identifier == 'test':
+            raise ValueError('cannot delete token, this is needed for password verification')
 
         del self.__data[identifier]
         del self.__ivs[identifier]
@@ -231,6 +241,13 @@ class TokenStore:
     def save(self, filename, iv_filename):
         if not self.__is_encrypted:
             raise ValueError('cannot save unencrypted data')
+
+        test_value, test_iv = self.__encryptor.encrypt(str.encode(
+            ''.join([random.choice(string.ascii_letters + string.digits) for _ in range(16)])
+        ), self.__password, self.__salt)
+
+        self.__data['test'] = base64.b64encode(test_value).decode('ascii')
+        self.__ivs['test'] = test_iv
 
         with open(filename, 'w+') as file:
             # noinspection PyTypeChecker

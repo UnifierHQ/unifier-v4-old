@@ -22,24 +22,10 @@ import sys
 
 install_option = sys.argv[1] if len(sys.argv) > 1 else None
 
-install_options = [
-    {
-        'id': 'optimized',
-        'name': '\U000026A1 Optimized',
-        'description': 'Uses the latest Nextcord version and includes performance optimizations. Recommended for most users.',
-        'default': True,
-        'prefix': '',
-        'color': '\x1b[35'
-    },
-    {
-        'id': 'stable',
-        'name': '\U0001F48E Stable',
-        'description': 'Uses the latest stable Nextcord version without performance optimizations for best stability.',
-        'default': False,
-        'prefix': 'stable',
-        'color': '\x1b[32'
-    }
-]
+with open('boot/internal.json') as file:
+    internal = json.load(file)
+
+install_options = internal['options']
 
 prefix = None
 
@@ -67,13 +53,16 @@ binary = boot_config['bootloader'].get('binary', 'py -3' if sys.platform == 'win
 
 print('\x1b[36;1mInstalling dependencies, this may take a while...\x1b[0m')
 
+user_arg = ' --user' if not boot_config['bootloader'].get('global_dep_install',False) else ''
+
 if prefix:
-    code = os.system(f'{binary} -m pip install --user -U -r requirements_{prefix}.txt')
+    code = os.system(f'{binary} -m pip install{user_arg} -U -r requirements_{prefix}.txt')
 else:
-    code = os.system(f'{binary} -m pip install --user -U -r requirements.txt')
+    code = os.system(f'{binary} -m pip install{user_arg} -U -r requirements.txt')
 
 if not code == 0:
     print('\x1b[31;1mCould not install dependencies.\x1b[0m')
+    print('\x1b[31;1mIf you\'re using a virtualenv, you might want to set global_dep_install to true in bootloader configuration to fix this.\x1b[0m')
     sys.exit(code)
 
 print('\x1b[36;1mDependencies successfully installed.\x1b[0m')

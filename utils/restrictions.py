@@ -50,6 +50,9 @@ class Restrictions:
     class CustomMissingArgument(commands.CheckFailure):
         pass
 
+    class TooManyPermissions(commands.CheckFailure):
+        pass
+
     @property
     def attached(self):
         return self.__attached
@@ -123,6 +126,14 @@ class Restrictions:
                 return ctx.author.guild_permissions.manage_channels
             else:
                 return ctx.author.guild_permissions.ban_members or ctx.author.guild_permissions.manage_channels
+
+        return commands.check(predicate)
+
+    def no_admin_perms(self):
+        async def predicate(ctx: commands.Context):
+            if ctx.guild.me.guild_permissions.administrator:
+                raise self.TooManyPermissions('Administrator')
+            return True
 
         return commands.check(predicate)
 
